@@ -2,6 +2,18 @@ import pickle
 from abc import abstractmethod
 
 import numpy as np
+from gurobipy import *
+
+
+def fcpm(abscisses, ordonnees, x):
+    # Trouver l'intervalle dans lequel x se trouve
+    for i in range(len(abscisses) - 1):
+        if abscisses[i] <= x <= abscisses[i + 1]:
+            # Calculer la valeur de la fonction par morceaux dans cet intervalle
+            pente = (ordonnees[i + 1] - ordonnees[i]) / \
+                (abscisses[i + 1] - abscisses[i])
+            y = ordonnees[i] + pente * (x - abscisses[i])
+            return y
 
 
 class BaseModel(object):
@@ -140,8 +152,8 @@ class RandomExampleModel(BaseModel):
         """
         np.random.seed(self.seed)
         num_features = X.shape[1]
-        weights_1 = np.random.rand(num_features) # Weights cluster 1
-        weights_2 = np.random.rand(num_features) # Weights cluster 2
+        weights_1 = np.random.rand(num_features)  # Weights cluster 1
+        weights_2 = np.random.rand(num_features)  # Weights cluster 2
 
         weights_1 = weights_1 / np.sum(weights_1)
         weights_2 = weights_2 / np.sum(weights_2)
@@ -161,9 +173,10 @@ class RandomExampleModel(BaseModel):
         np.ndarray:
             (n_samples, n_clusters) array of decision function value for each cluster.
         """
-        u_1 = np.dot(X, self.weights[0]) # Utility for cluster 1 = X^T.w_1
-        u_2 = np.dot(X, self.weights[1]) # Utility for cluster 2 = X^T.w_2
-        return np.stack([u_1, u_2], axis=1) # Stacking utilities over cluster on axis 1
+        u_1 = np.dot(X, self.weights[0])  # Utility for cluster 1 = X^T.w_1
+        u_2 = np.dot(X, self.weights[1])  # Utility for cluster 2 = X^T.w_2
+        # Stacking utilities over cluster on axis 1
+        return np.stack([u_1, u_2], axis=1)
 
 
 class TwoClustersMIP(BaseModel):
@@ -183,11 +196,16 @@ class TwoClustersMIP(BaseModel):
         """
         self.seed = 123
         self.model = self.instantiate()
+        self.n_pieces = n_pieces
+        self.n_clusters = n_clusters
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
         # To be completed
-        return
+
+        model = Model("TwoClustersMIP")
+
+        return model
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -200,8 +218,79 @@ class TwoClustersMIP(BaseModel):
             (n_samples, n_features) features of unchosen elements
         """
 
-        # To be completed
-        return
+        n_samples, n_features = X.shape
+
+        M = 10
+
+        # Calcul des X_i_l
+
+        all_features = np.concatenate([X, Y])
+
+        x_abs = []
+
+        for i in range(n_features):
+            current_feature_values = all_features[:, i]
+            min_value = np.min(current_feature_values)
+            max_value = np.max(current_feature_values)
+            x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
+
+        # Variables
+
+        u = []
+        for k in range(self.n_clusters):
+            u.append([])
+            for i in range(n_features):
+                u[k].append([])
+                for l in range(self.n_pieces):
+                    u[k][i].append(self.model.addVar(
+                        lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"u_{k}_{i}_{l}"))
+
+        v = []
+        for j in range(n_samples):
+            v.append([])
+            for k in range(self.n_clusters):
+                v[j].append(self.model.addVar(
+                    vtype=GRB.BINARY, name=f"v_{j}_{k}"))
+
+        sig_x_p = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
+        sig_x_m = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
+        sig_y_p = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
+        sig_y_m = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
+
+        # Contraintes
+
+        for k in range(self.n_clusters):
+            for l in range(self.n_pieces-1):
+                self.model.addConstr(u[k][i][l] <= u[k][i][l+1])
+
+        for k in range(self.n_clusters):
+            self.model.addConstr(quicksum(u[k][i][self.n_pieces-1]
+                                 for i in range(n_features)) == 1)
+
+        for j in range(n_samples):
+            self.model.addConstr(quicksum(v[j][k]
+                                 for k in range(self.n_clusters)) >= 1)
+
+        for k in range(self.n_clusters):
+            for i in range(n_features):
+                self.model.addConstr(u[k][i][0] == 0)
+
+        for j in range(n_samples):
+            for k in range(self.n_clusters):
+                ukxj = quicksum(fcpm(x_abs[i], u[k][i], X[j][i])
+                                for i in range(n_features))
+                ukyj = quicksum(fcpm(x_abs[i], u[k][i], Y[j][i])
+                                for i in range(n_features))
+                self.model.addConstr(
+                    ukxj-sig_x_p[j]+sig_x_m[j]-ukyj+sig_y_p[j]-sig_y_m[j] <= M*v[j][k])
+                self.model.addConstr(
+                    ukxj-sig_x_p[j]+sig_x_m[j]-ukyj+sig_y_p[j]-sig_y_m[j] >= M*(1-v[j][k]))
+
+        self.model.setObjective(quicksum(
+            sig_y_p[j]+sig_y_m[j]+sig_x_p[j]+sig_x_m[j] for j in range(n_samples)), GRB.MINIMIZE)
+        self.model.optimize()
+
+        return self
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
@@ -210,7 +299,7 @@ class TwoClustersMIP(BaseModel):
         -----------
         X: np.ndarray
             (n_samples, n_features) list of features of elements
-        
+
         Returns
         -------
         np.ndarray:
@@ -230,7 +319,7 @@ class HeuristicModel(BaseModel):
         """Initialization of the Heuristic Model.
         """
         self.seed = 123
-        self.models = self.instantiate()
+        self.model = self.instantiate()
 
     def instantiate(self):
         """Instantiation of the MIP Variables"""
@@ -257,7 +346,7 @@ class HeuristicModel(BaseModel):
         -----------
         X: np.ndarray
             (n_samples, n_features) list of features of elements
-        
+
         Returns
         -------
         np.ndarray:
