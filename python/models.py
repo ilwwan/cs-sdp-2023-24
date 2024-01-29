@@ -198,6 +198,7 @@ class TwoClustersMIP(BaseModel):
         self.model = self.instantiate()
         self.n_pieces = n_pieces
         self.n_clusters = n_clusters
+        self.x_abs = None
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
@@ -226,13 +227,13 @@ class TwoClustersMIP(BaseModel):
 
         all_features = np.concatenate([X, Y])
 
-        x_abs = []
+        self.x_abs = []
 
         for i in range(n_features):
             current_feature_values = all_features[:, i]
             min_value = np.min(current_feature_values)
             max_value = np.max(current_feature_values)
-            x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
+            self.x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
 
         # Variables
 
@@ -252,10 +253,21 @@ class TwoClustersMIP(BaseModel):
                 v[j].append(self.model.addVar(
                     vtype=GRB.BINARY, name=f"v_{j}_{k}"))
 
-        sig_x_p = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
-        sig_x_m = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
-        sig_y_p = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
-        sig_y_m = self.model.addVars(n_samples, lb=0, vtype=GRB.CONTINUOUS)
+        sig_x_p = {}
+        sig_x_m = {}
+        sig_y_p = {}
+        sig_y_m = {}
+
+        for j in range(n_samples):
+            for k in range(self.n_clusters):
+                sig_x_p[j, k] = self.model.addVar(
+                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_x_p_{j}_{k}")
+                sig_x_m[j, k] = self.model.addVar(
+                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_x_m_{j}_{k}")
+                sig_y_p[j, k] = self.model.addVar(
+                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_y_p_{j}_{k}")
+                sig_y_m[j, k] = self.model.addVar(
+                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}_{k}")
 
         # Contraintes
 
@@ -277,17 +289,18 @@ class TwoClustersMIP(BaseModel):
 
         for j in range(n_samples):
             for k in range(self.n_clusters):
-                ukxj = quicksum(fcpm(x_abs[i], u[k][i], X[j][i])
-                                for i in range(n_features))
-                ukyj = quicksum(fcpm(x_abs[i], u[k][i], Y[j][i])
-                                for i in range(n_features))
+                ukxj = quicksum(
+                    fcpm(self.x_abs[i], u[k][i], X[j][i]) for i in range(n_features))
+                ukyj = quicksum(
+                    fcpm(self.x_abs[i], u[k][i], Y[j][i]) for i in range(n_features))
                 self.model.addConstr(
-                    ukxj-sig_x_p[j]+sig_x_m[j]-ukyj+sig_y_p[j]-sig_y_m[j] <= M*v[j][k])
+                    ukxj - sig_x_p[j, k] + sig_x_m[j, k] - ukyj + sig_y_p[j, k] - sig_y_m[j, k] <= M * v[j][k])
                 self.model.addConstr(
-                    ukxj-sig_x_p[j]+sig_x_m[j]-ukyj+sig_y_p[j]-sig_y_m[j] >= M*(1-v[j][k]))
+                    ukxj - sig_x_p[j, k] + sig_x_m[j, k] - ukyj + sig_y_p[j, k] - sig_y_m[j, k] >= M * (1 - v[j][k]))
 
-        self.model.setObjective(quicksum(
-            sig_y_p[j]+sig_y_m[j]+sig_x_p[j]+sig_x_m[j] for j in range(n_samples)), GRB.MINIMIZE)
+        self.model.setObjective(quicksum(sig_y_p[j, k]*v[j][k] + sig_y_m[j, k]*v[j][k] + sig_x_p[j, k]*v[j][k] + sig_x_m[j, k]*v[j][k]
+                                for j in range(n_samples) for k in range(self.n_clusters)), GRB.MINIMIZE)
+
         self.model.optimize()
 
         return self
@@ -305,9 +318,21 @@ class TwoClustersMIP(BaseModel):
         np.ndarray:
             (n_samples, n_clusters) array of decision function value for each cluster.
         """
-        # To be completed
-        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+        n_samples, n_features = X.shape
+        decision_values = np.zeros((n_samples, self.n_clusters))
+
+        for j in range(n_samples):
+            for k in range(self.n_clusters):
+                pred = []
+                ukil = []
+                for l in range(self.n_pieces):
+                    for i in range(n_features):
+                        ukil.append(self.model.getVarByName(
+                            f"u_{k}_{i}_{l}").x)
+                pred.append(sum(fcpm(self.x_abs[i], ukil, X[j][i])
+                                for i in range(n_features)))
+                decision_values[j, :] = pred
+        return decision_values
 
 
 class HeuristicModel(BaseModel):
