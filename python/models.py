@@ -237,15 +237,20 @@ class TwoClustersMIP(BaseModel):
 
         # Variables
 
+#On construit les u[k], fonctions de décisions de chaque cluster k
+#On les construit vides, ils seront remplis après
         u = []
         for k in range(self.n_clusters):
             u.append([])
+            #pour chaque cluster k, on ajoute une fonction de décision associée à chaque critère i
             for i in range(n_features):
                 u[k].append([])
+                #enfin, pour chaque u[k][i], fonction de décision de d'un critère au sein d'un cluster, on crée la variable qui représente l'ordonnée à l'origine de la cassure
                 for l in range(self.n_pieces):
                     u[k][i].append(self.model.addVar(
                         lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"u_{k}_{i}_{l}"))
-
+                    
+#On construit les v[j][k], qui valent 1 si la paire j est dans le cluster k, 0 sinon
         v = []
         for j in range(n_samples):
             v.append([])
@@ -253,6 +258,8 @@ class TwoClustersMIP(BaseModel):
                 v[j].append(self.model.addVar(
                     vtype=GRB.BINARY, name=f"v_{j}_{k}"))
 
+
+#Définition des erreurs d'estimation sigma_x plus et moins, sigma_y plus et moins
         sig_x_p = {}
         sig_x_m = {}
         sig_y_p = {}
@@ -269,20 +276,23 @@ class TwoClustersMIP(BaseModel):
                 sig_y_m[j, k] = self.model.addVar(
                     lb=0, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}_{k}")
 
-        # Contraintes
-
+        ### Contraintes
+        #Croissance des fonctions de décision sur leur intervalle de définition
         for k in range(self.n_clusters):
             for l in range(self.n_pieces-1):
                 self.model.addConstr(u[k][i][l] <= u[k][i][l+1])
-
+        
+        #Normalisation des critères : la somme des max des u[k] vaut 1.
         for k in range(self.n_clusters):
             self.model.addConstr(quicksum(u[k][i][self.n_pieces-1]
                                  for i in range(n_features)) == 1)
 
+        #Chaque paire j est présente dans au moins 1 cluster
         for j in range(n_samples):
             self.model.addConstr(quicksum(v[j][k]
                                  for k in range(self.n_clusters)) >= 1)
 
+        #Les fonctions de décision u[k][i] commencent à 0
         for k in range(self.n_clusters):
             for i in range(n_features):
                 self.model.addConstr(u[k][i][0] == 0)
