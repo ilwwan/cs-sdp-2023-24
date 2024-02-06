@@ -199,7 +199,7 @@ class TwoClustersMIP(BaseModel):
         self.n_pieces = n_pieces
         self.n_clusters = n_clusters
         self.x_abs = None
-        self.eps = 0.001
+        self.eps = 0.0001
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
@@ -307,9 +307,9 @@ class TwoClustersMIP(BaseModel):
                 ukyj = quicksum(
                     fcpm(self.x_abs[i], u[k][i], Y[j][i]) for i in range(n_features))
                 self.model.addConstr(
-                    ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps >= - M * (1 - v[j][k]))
-                self.model.addConstr(
-                    ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps <= M*v[j][k])
+                    ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps >= M * (v[j][k] - 1))
+                # self.model.addConstr(
+                #     ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps >= - M*v[j][k])
 
         self.model.setObjective(quicksum(sig_x_p[j] + sig_x_m[j] + sig_y_p[j] + sig_y_m[j]
                                 for j in range(n_samples) for k in range(self.n_clusters)), GRB.MINIMIZE)
@@ -335,17 +335,15 @@ class TwoClustersMIP(BaseModel):
         decision_values = np.zeros((n_samples, self.n_clusters))
 
         for j in range(n_samples):
+            pred = []
             for k in range(self.n_clusters):
-                pred = []
                 s = 0
                 for i in range(n_features):
-                    ukil = []
-                    for l in range(self.n_pieces):
-                        ukil.append(self.model.getVarByName(
-                            f"u_{k}_{i}_{l}").x)
+                    ukil = [self.model.getVarByName(
+                        f"u_{k}_{i}_{l}").x for l in range(self.n_pieces)]
                     s += fcpm(self.x_abs[i], ukil, X[j][i])
                 pred.append(s)
-            decision_values[j, :] = pred
+            decision_values[j] = pred
         return decision_values
 
 
