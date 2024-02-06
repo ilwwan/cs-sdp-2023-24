@@ -199,12 +199,14 @@ class TwoClustersMIP(BaseModel):
         self.n_pieces = n_pieces
         self.n_clusters = n_clusters
         self.x_abs = None
+        self.eps = 0.001
 
     def instantiate(self):
         """Instantiation of the MIP Variables - To be completed."""
         # To be completed
 
         model = Model("TwoClustersMIP")
+        model.setParam('TimeLimit', 5*60)
 
         return model
 
@@ -221,7 +223,7 @@ class TwoClustersMIP(BaseModel):
 
         n_samples, n_features = X.shape
 
-        M = 10
+        M = 2
 
         # Calcul des X_i_l
 
@@ -262,16 +264,20 @@ class TwoClustersMIP(BaseModel):
 
 
 # Définition des erreurs d'estimation sigma_x plus et moins, sigma_y plus et moins
-        sig_p = {}
-        sig_m = {}
+        sig_y_p = {}
+        sig_y_m = {}
+        sig_x_p = {}
+        sig_x_m = {}
 
         for j in range(n_samples):
-            for k in range(self.n_clusters):
-                sig_p[j, k] = self.model.addVar(
-                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_p_{j}_{k}")
-                sig_m[j, k] = self.model.addVar(
-                    lb=0, vtype=GRB.CONTINUOUS, name=f"sig_m_{j}_{k}")
-
+            sig_x_p[j] = self.model.addVar(
+                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_x_p_{j}_{k}")
+            sig_x_m[j] = self.model.addVar(
+                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_x_m_{j}_{k}")
+            sig_y_p[j] = self.model.addVar(
+                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_p_{j}_{k}")
+            sig_y_m[j] = self.model.addVar(
+                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}_{k}")
         # Contraintes
         # Croissance des fonctions de décision sur leur intervalle de définition
         for k in range(self.n_clusters):
@@ -301,11 +307,11 @@ class TwoClustersMIP(BaseModel):
                 ukyj = quicksum(
                     fcpm(self.x_abs[i], u[k][i], Y[j][i]) for i in range(n_features))
                 self.model.addConstr(
-                    ukxj - ukyj - sig_p[j, k] + sig_m[j, k] <= M * v[j][k])
+                    ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps >= - M * (1 - v[j][k]))
                 self.model.addConstr(
-                    ukxj - ukyj - sig_p[j, k] + sig_m[j, k] >= M * (v[j][k] - 1))
+                    ukxj - ukyj - sig_x_p[j] + sig_x_m[j] + sig_y_p[j] - sig_y_m[j] - self.eps <= M*v[j][k])
 
-        self.model.setObjective(quicksum(sig_p[j, k] + sig_m[j, k]
+        self.model.setObjective(quicksum(sig_x_p[j] + sig_x_m[j] + sig_y_p[j] + sig_y_m[j]
                                 for j in range(n_samples) for k in range(self.n_clusters)), GRB.MINIMIZE)
 
         self.model.optimize()
@@ -331,14 +337,15 @@ class TwoClustersMIP(BaseModel):
         for j in range(n_samples):
             for k in range(self.n_clusters):
                 pred = []
-                ukil = []
-                for l in range(self.n_pieces):
-                    for i in range(n_features):
+                s = 0
+                for i in range(n_features):
+                    ukil = []
+                    for l in range(self.n_pieces):
                         ukil.append(self.model.getVarByName(
                             f"u_{k}_{i}_{l}").x)
-                pred.append(sum(fcpm(self.x_abs[i], ukil, X[j][i])
-                                for i in range(n_features)))
-                decision_values[j, :] = pred
+                    s += fcpm(self.x_abs[i], ukil, X[j][i])
+                pred.append(s)
+            decision_values[j, :] = pred
         return decision_values
 
 
