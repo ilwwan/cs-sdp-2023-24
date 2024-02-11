@@ -10,7 +10,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
-from metric import PairsExplained
+from metrics import PairsExplained
 from models import *
 from data import Dataloader
 
@@ -78,6 +78,78 @@ class HeuristicModel(BaseModel):
 
     ### VISUALISATION
 
+def affiche(PCA_cluster_clients, PCA_data_preferences) :
+    nb_composantes_PCA = np.shape(PCA_data_preferences)[1]
+
+    if nb_composantes_PCA == 2 :
+        plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 1], c=PCA_cluster_clients.labels_, cmap='viridis')
+        plt.xlabel('Première composante principale')
+        plt.ylabel('Deuxième composante principale')
+        plt.title('Visualisation des clusters avec PCA')
+        plt.colorbar(label='Cluster')
+        plt.show()
+        
+    elif nb_composantes_PCA >= 3 : 
+        PCA3_fig = plt.figure(figsize = (15,8))
+
+        # Visualisation des clusters en utilisant les deux premières composantes principales de la PCA
+        plt.subplot(2,2,1)
+        plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 1], c=PCA_cluster_clients.labels_, cmap='viridis')
+        plt.xlabel('Première composante principale')
+        plt.ylabel('Deuxième composante principale')
+        plt.title('Visualisation des clusters avec PCA 1/3')
+        plt.colorbar(label='Cluster')
+
+        # Visualisation des clusters en utilisant les première et troisième composantes principales de la PCA
+        plt.subplot(2,2,2)
+        plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 2], c=PCA_cluster_clients.labels_, cmap='viridis')
+        plt.xlabel('Première composante principale')
+        plt.ylabel('Troisième composante principale')
+        plt.title('Visualisation des clusters avec PCA 2/3')
+        plt.colorbar(label='Cluster')
+
+        # Visualisation des clusters en utilisant les deuxième et troisième composantes principales de la PCA
+        plt.subplot(2,2,3)
+        plt.scatter(PCA_data_preferences[:, 1], PCA_data_preferences[:, 2], c=PCA_cluster_clients.labels_, cmap='viridis')
+        plt.xlabel('Deuxième composante principale')
+        plt.ylabel('Troisième composante principale')
+        plt.title('Visualisation des clusters avec PCA 3/3')
+        plt.colorbar(label='Cluster')
+
+        plt.show()
+
+        if nb_composantes_PCA == 4 :
+            plt.close()
+
+            #Test pour une PCA à 4 composantes 
+            PCA4_fig = plt.figure(figsize = (15,8))
+
+            # Visualisation des clusters en utilisant les première et quatrième composantes principales de la PCA
+            plt.subplot(2,2,1)
+            plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 3], c=PCA_cluster_clients.labels_, cmap='viridis')
+            plt.xlabel('Première composante principale')
+            plt.ylabel('Quatrième composante principale')
+            plt.title('Visualisation des clusters avec 4 PCA 1/3')
+            plt.colorbar(label='Cluster')
+
+            # Visualisation des clusters en utilisant les deuxième et quatrième composantes principales de la PCA
+            plt.subplot(2,2,2)
+            plt.scatter(PCA_data_preferences[:, 1], PCA_data_preferences[:, 3], c=PCA_cluster_clients.labels_, cmap='viridis')
+            plt.xlabel('Deuxième composante principale')
+            plt.ylabel('Quatrième composante principale')
+            plt.title('Visualisation des clusters avec 4 PCA 2/3')
+            plt.colorbar(label='Cluster')
+
+            # Visualisation des clusters en utilisant les troisième et quatrième composantes principales de la PCA
+            plt.subplot(2,2,3)
+            plt.scatter(PCA_data_preferences[:, 2], PCA_data_preferences[:, 3], c=PCA_cluster_clients.labels_, cmap='viridis')
+            plt.xlabel('Troisième composante principale')
+            plt.ylabel('Quatrième composante principale')
+            plt.title('Visualisation des clusters avec 4 PCA 3/3')
+            plt.colorbar(label='Cluster')
+
+            plt.show()
+
 
 
 data_loader = Dataloader("/Users/antoine/Desktop/CS/CS-COURS/3A/IA/SDP/cs-sdp-2023-24/data/dataset_10") # Specify path to the dataset you want to load
@@ -86,33 +158,10 @@ X, Y = data_loader.load()
 parameters = {"n_pieces": 5, "n_clusters" :3} # Can be completed
 model = HeuristicModel(**parameters)
 PCA_cluster_clients, PCA_data_preferences = model.fit(X,Y)
+affiche(PCA_cluster_clients, PCA_data_preferences)
 
-figure = plt.figure(figsize = (15,8))
 
-# Visualisation des clusters en utilisant les deux premières composantes principales de la PCA
-plt.subplot(2,2,1)
-plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 1], c=PCA_cluster_clients.labels_, cmap='viridis')
-plt.xlabel('Première composante principale')
-plt.ylabel('Deuxième composante principale')
-plt.title('Visualisation des clusters avec PCA 1/3')
-plt.colorbar(label='Cluster')
 
-# Visualisation des clusters en utilisant les première et troisième composantes principales de la PCA
-plt.subplot(2,2,2)
-plt.scatter(PCA_data_preferences[:, 0], PCA_data_preferences[:, 2], c=PCA_cluster_clients.labels_, cmap='viridis')
-plt.xlabel('Première composante principale')
-plt.ylabel('Troisième composante principale')
-plt.title('Visualisation des clusters avec PCA 2/3')
-plt.colorbar(label='Cluster')
 
-# Visualisation des clusters en utilisant les deuxième et troisième composantes principales de la PCA
-plt.subplot(2,2,3)
-plt.scatter(PCA_data_preferences[:, 1], PCA_data_preferences[:, 2], c=PCA_cluster_clients.labels_, cmap='viridis')
-plt.xlabel('Deuxième composante principale')
-plt.ylabel('Troisième composante principale')
-plt.title('Visualisation des clusters avec PCA 3/3')
-plt.colorbar(label='Cluster')
 
-plt.show()
 
-print(figure.get_size_inches())
