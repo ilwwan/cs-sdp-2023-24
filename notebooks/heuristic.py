@@ -29,7 +29,7 @@ class HeuristicModel(BaseModel):
         self.n_iter = n_iter
         self.x_abs = None
         self.eps = 0.0001
-        self.model = self.instantiate()
+        self.models = self.instantiate()
 
     def instantiate(self):
         """Instantiation of the MIP Variables"""
@@ -195,8 +195,9 @@ class HeuristicModel(BaseModel):
         return decision_values
         
 
-    
-    
+def select_lines(X, clusters, k):
+    mask = clusters == k
+    return X[mask]
     
     
     
