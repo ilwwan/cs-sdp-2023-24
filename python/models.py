@@ -3,6 +3,10 @@ from abc import abstractmethod
 
 import numpy as np
 from gurobipy import GRB, Model, quicksum
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+from scipy.interpolate import interp1d
 
 
 def fcpm(abscisses, ordonnees, x):
@@ -15,6 +19,11 @@ def fcpm(abscisses, ordonnees, x):
             )
             y = ordonnees[i] + pente * (x - abscisses[i])
             return y
+
+
+def select_lines(X, clusters, k):
+    mask = clusters == k
+    return X[mask]
 
 
 class BaseModel(object):
@@ -209,6 +218,9 @@ class TwoClustersMIP(BaseModel):
 
         return model
 
+    def u_k(self, x, k, eval=False):
+        return sum(self.u_ki(x[i], k, i, eval) for i in range(len(x)))
+
     def u_ki(self, x, k, i, eval=False):
         get_val = (lambda v: v.X) if eval else (lambda v: v)
 
@@ -233,18 +245,33 @@ class TwoClustersMIP(BaseModel):
         """
 
         P_samples, n_features = X.shape
+        P_samples, n_features = X.shape
 
+        M = 2  # Majorant pour les contraines
+
+        ###
         M = 2  # Majorant pour les contraines
 
         ###
         # Variables
         ###
+        ###
 
+        # Points de cassure des fonctions de décision UTA
+        self.u = []
         # Points de cassure des fonctions de décision UTA
         self.u = []
         for k in range(self.n_clusters):
             self.u.append([])
+            self.u.append([])
             for i in range(n_features):
+                self.u[k].append([])
+                for l in range(self.n_pieces + 1):
+                    self.u[k][i].append(
+                        self.model.addVar(
+                            lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"u_{k}_{i}_{l}"
+                        )
+                    )
                 self.u[k].append([])
                 for l in range(self.n_pieces + 1):
                     self.u[k][i].append(
@@ -257,9 +284,18 @@ class TwoClustersMIP(BaseModel):
         self.v = []
         for j in range(P_samples):
             self.v.append([])
+        # v[j][k] = 1 si la paire j est dans le cluster k, 0 sinon
+        self.v = []
+        for j in range(P_samples):
+            self.v.append([])
             for k in range(self.n_clusters):
                 self.v[j].append(self.model.addVar(vtype=GRB.BINARY, name=f"v_{j}_{k}"))
 
+        # Définition des erreurs de sur et sous-estimation sigma_x + et -, sigma_y + et -
+        self.sig_y_p = []
+        self.sig_y_m = []
+        self.sig_x_p = []
+        self.sig_x_m = []
         # Définition des erreurs de sur et sous-estimation sigma_x + et -, sigma_y + et -
         self.sig_y_p = []
         self.sig_y_m = []
@@ -285,6 +321,7 @@ class TwoClustersMIP(BaseModel):
         ###
         # Contraintes
         ###
+        ###
         # Croissance des fonctions de décision sur leur intervalle de définition
         for k in range(self.n_clusters):
             for i in range(n_features):
@@ -302,15 +339,22 @@ class TwoClustersMIP(BaseModel):
             self.model.addConstr(
                 quicksum(self.v[j][k] for k in range(self.n_clusters)) >= 1
             )
+        for j in range(P_samples):
+            self.model.addConstr(
+                quicksum(self.v[j][k] for k in range(self.n_clusters)) >= 1
+            )
 
         # Les fonctions de décision u[k][i] commencent à 0
         for k in range(self.n_clusters):
             for i in range(n_features):
                 self.model.addConstr(self.u[k][i][0] == 0)
+                self.model.addConstr(self.u[k][i][0] == 0)
 
         # Définition des erreurs de sur et sous-estimation sigma_x + et -, sigma_y + et - par rapport aux utilités
         for j in range(P_samples):
             for k in range(self.n_clusters):
+                ukxj = self.u_k(X[j], k)
+                ukyj = self.u_k(Y[j], k)
                 ukxj = self.u_k(X[j], k)
                 ukyj = self.u_k(Y[j], k)
                 self.model.addConstr(
@@ -319,7 +363,6 @@ class TwoClustersMIP(BaseModel):
                     - (ukyj - self.sig_y_p[j] + self.sig_y_m[j])
                     >= self.eps
                 )
-
         ###
         # Fonction objectif
         ###
@@ -352,25 +395,35 @@ class TwoClustersMIP(BaseModel):
         P_samples, n_features = X.shape
         for j in range(P_samples):
             ret.append([])
+        ret = []
+        P_samples, n_features = X.shape
+        for j in range(P_samples):
+            ret.append([])
             for k in range(self.n_clusters):
                 ret[j].append(self.u_k(X[j], k, eval=True))
         return np.array(ret)
 
 
-class HeuristicModel(BaseModel):
+class HeuristicModelOld(BaseModel):
     """Skeleton of MIP you have to write as the first exercise.
     You have to encapsulate your code within this class that will be called for evaluation.
     """
 
-    def __init__(self):
+    def __init__(self, n_clusters):
         """Initialization of the Heuristic Model."""
         self.seed = 123
         self.model = self.instantiate()
+        self.K = n_clusters
 
     def instantiate(self):
         """Instantiation of the MIP Variables"""
-        # To be completed
-        return
+        models = []
+        for i in range(self.K):
+            models.append(Model(f"Heuristic_{i}"))
+            models[i].setParam("TimeLimit", 10)
+            models[i].setParam("OutputFlag", 0)
+
+        return models
 
     def fit(self, X, Y):
         """Estimation of the parameters - To be completed.
@@ -382,8 +435,108 @@ class HeuristicModel(BaseModel):
         Y: np.ndarray
             (n_samples, n_features) features of unchosen elements
         """
-        # To be completed
-        return
+        n_samples, n_features = X.shape
+
+        all_features = np.concatenate([X, Y])
+
+        self.x_abs = []
+
+        for i in range(n_features):
+            current_feature_values = all_features[:, i]
+            min_value = np.min(current_feature_values)
+            max_value = np.max(current_feature_values)
+            self.x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
+
+        sample_cluster = np.random.randint(0, self.n_clusters, size=(n_samples))
+
+        for a in range(self.n_iter):
+
+            print(f"Itération {a} sur {self.n_iter}")
+
+            X_clusters = [select_lines(X, sample_cluster, k) for k in range(self.K)]
+            Y_clusters = [select_lines(Y, sample_cluster, k) for k in range(self.K)]
+
+            for m in range(self.K):
+
+                # Variables
+
+                # On construit les u[k], fonctions de décisions de chaque cluster k
+                # On les construit vides, ils seront remplis après
+
+                u = []
+                for i in range(n_features):
+                    u.append([])
+                    for l in range(self.n_pieces):
+                        u[i].append(
+                            self.models[m].addVar(
+                                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"u_{i}_{l}"
+                            )
+                        )
+
+                # Définition des erreurs d'estimation sigma_x plus et moins, sigma_y plus et moins
+
+                sig_p = {}
+                sig_m = {}
+
+                for j in range(len(X_clusters[m])):
+                    sig_p[j] = self.models[m].addVar(
+                        lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_p_{j}"
+                    )
+                    sig_m[j] = self.models[m].addVar(
+                        lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}"
+                    )
+
+                # Contraintes
+                # Croissance des fonctions de décision sur leur intervalle de définition
+                for i in range(n_features):
+                    for l in range(self.n_pieces - 1):
+                        self.models[m].addConstr(u[i][l] <= u[i][l + 1])
+
+                self.models[m].addConstr(
+                    quicksum(u[i][self.n_pieces - 1] for i in range(n_features)) == 1
+                )
+
+                # Les fonctions de décision u[k][i] commencent à 0
+                for i in range(n_features):
+                    self.models[m].addConstr(u[i][0] == 0)
+
+                for j in range(len(X_clusters[m])):
+                    uxj = quicksum(
+                        fcpm(self.x_abs[i], u[i], X_clusters[m][j][i])
+                        for i in range(n_features)
+                    )
+                    uyj = quicksum(
+                        fcpm(self.x_abs[i], u[i], Y_clusters[m][j][i])
+                        for i in range(n_features)
+                    )
+                    self.models[m].addConstr(
+                        uxj - uyj - sig_m[j] + sig_p[j] >= self.eps
+                    )
+
+                self.models[m].setObjective(
+                    quicksum(sig_m[j] + sig_p[j] for j in range(len(X_clusters[m]))),
+                    GRB.MINIMIZE,
+                )
+
+                self.models[m].optimize()
+
+            new_X_clusters = [[] for k in range(len(X_clusters))]
+            new_Y_clusters = [[] for k in range(len(X_clusters))]
+
+            for k in range(len(X_clusters)):
+                u = []
+                for i in range(len(X_clusters[k])):
+                    ux = self.predict_utility([X_clusters[k][i]])
+                    uy = self.predict_utility([X_clusters[k][i]])
+                    diff_utility = [ux[0][m] - uy[0][m] for m in range(len(ux[0]))]
+                    kluster = diff_utility.index(max(diff_utility))
+                    new_X_clusters[kluster].append(X_clusters[k][i])
+                    new_Y_clusters[kluster].append(Y_clusters[k][i])
+
+            X_clusters = new_X_clusters.copy()
+            Y_clusters = new_Y_clusters.copy()
+
+        return self
 
     def predict_utility(self, X):
         """Return Decision Function of the MIP for X. - To be completed.
@@ -398,6 +551,189 @@ class HeuristicModel(BaseModel):
         np.ndarray:
             (n_samples, n_clusters) array of decision function value for each cluster.
         """
-        # To be completed
-        # Do not forget that this method is called in predict_preference (line 42) and therefor should return well-organized data for it to work.
-        return
+        n_samples, n_features = X.shape
+        decision_values = np.zeros((n_samples, self.K))
+
+        for j in range(n_samples):
+            pred = []
+            for m in range(self.K):
+                s = 0
+                for i in range(n_features):
+                    ukil = [
+                        self.models[m].getVarByName(f"u_{i}_{l}").x
+                        for l in range(self.n_pieces)
+                    ]
+                    s += fcpm(self.x_abs[i], ukil, X[j][i])
+                pred.append(s)
+            decision_values[j] = pred
+        return decision_values
+
+
+class HeuristicModel(BaseModel):
+
+    def __init__(self, n_clusters, n_pieces=5, n_iter=3):
+        """Initialization of the Heuristic Model."""
+        self.K = n_clusters
+        self.n_pieces = n_pieces
+        self.n_iter = n_iter
+        self.eps = 0.0001
+        self.models = self.instantiate()
+
+    def instantiate(self):
+        models = []
+        for i in range(self.K):
+            models.append(Model(f"Heuristic_{i}"))
+
+        return models
+
+    def fit(self, X, Y):
+        """Estimation of the parameters - To be completed.
+
+        Parameters
+        ----------
+        X: np.ndarray
+            (n_samples, n_features) features of elements preferred to Y elements
+        Y: np.ndarray
+            (n_samples, n_features) features of unchosen elements
+        """
+
+        n_samples, n_features = X.shape
+
+        data = np.concatenate([X, Y], axis=1)
+        kmeans = KMeans(self.K)
+        kmeans.fit(data)
+
+        all_elements = np.concatenate([X, Y], axis=0)
+        self.criteria_min = all_elements.min(axis=0)
+        self.criteria_max = all_elements.max(axis=0)
+
+        X_clusters = [select_lines(X, kmeans.labels_, k) for k in range(self.K)]
+        Y_clusters = [select_lines(Y, kmeans.labels_, k) for k in range(self.K)]
+
+        all_features = np.concatenate([X, Y])
+
+        self.x_abs = []
+
+        for i in range(n_features):
+            current_feature_values = all_features[:, i]
+            min_value = np.min(current_feature_values)
+            max_value = np.max(current_feature_values)
+            self.x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
+
+        for a in range(self.n_iter):
+
+            print(f"Itération {a} sur {self.n_iter}")
+
+            for m in range(self.K):
+
+                # Variables
+
+                # On construit les u[k], fonctions de décisions de chaque cluster k
+                # On les construit vides, ils seront remplis après
+
+                u = []
+                for i in range(n_features):
+                    u.append([])
+                    for l in range(self.n_pieces):
+                        u[i].append(
+                            self.models[m].addVar(
+                                lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"u_{i}_{l}"
+                            )
+                        )
+
+                # Définition des erreurs d'estimation sigma_x plus et moins, sigma_y plus et moins
+
+                sig_p = {}
+                sig_m = {}
+
+                for j in range(len(X_clusters[m])):
+                    sig_p[j] = self.models[m].addVar(
+                        lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_p_{j}"
+                    )
+                    sig_m[j] = self.models[m].addVar(
+                        lb=0, ub=1, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}"
+                    )
+
+                # Contraintes
+                # Croissance des fonctions de décision sur leur intervalle de définition
+                for i in range(n_features):
+                    for l in range(self.n_pieces - 1):
+                        self.models[m].addConstr(u[i][l] <= u[i][l + 1])
+
+                self.models[m].addConstr(
+                    quicksum(u[i][self.n_pieces - 1] for i in range(n_features)) == 1
+                )
+
+                # Les fonctions de décision u[k][i] commencent à 0
+                for i in range(n_features):
+                    self.models[m].addConstr(u[i][0] == 0)
+
+                for j in range(len(X_clusters[m])):
+                    uxj = quicksum(
+                        fcpm(self.x_abs[i], u[i], X_clusters[m][j][i])
+                        for i in range(n_features)
+                    )
+                    uyj = quicksum(
+                        fcpm(self.x_abs[i], u[i], Y_clusters[m][j][i])
+                        for i in range(n_features)
+                    )
+                    self.models[m].addConstr(
+                        uxj - uyj - sig_m[j] + sig_p[j] >= self.eps
+                    )
+
+                self.models[m].setObjective(
+                    quicksum(sig_m[j] + sig_p[j] for j in range(len(X_clusters[m]))),
+                    GRB.MINIMIZE,
+                )
+
+                self.models[m].optimize()
+
+            new_X_clusters = [[] for k in range(len(X_clusters))]
+            new_Y_clusters = [[] for k in range(len(X_clusters))]
+
+            for k in range(len(X_clusters)):
+                u = []
+                for i in range(len(X_clusters[k])):
+                    ux = self.predict_utility(
+                        np.array(X_clusters[k][i]).reshape(1, len(X_clusters[k][i]))
+                    )
+                    uy = self.predict_utility(
+                        np.array(X_clusters[k][i]).reshape(1, len(X_clusters[k][i]))
+                    )
+                    diff_utility = [ux[0][m] - uy[0][m] for m in range(len(ux[0]))]
+                    kluster = diff_utility.index(max(diff_utility))
+                    new_X_clusters[kluster].append(X_clusters[k][i])
+                    new_Y_clusters[kluster].append(Y_clusters[k][i])
+
+            X_clusters = new_X_clusters.copy()
+            Y_clusters = new_Y_clusters.copy()
+
+    def predict_utility(self, X):
+        """Return Decision Function of the MIP for X. - To be completed.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            (n_samples, n_features) list of features of elements
+
+        Returns
+        -------
+        np.ndarray:
+            (n_samples, n_clusters) array of decision function value for each cluster.
+        """
+        n_samples, n_features = X.shape
+        decision_values = np.zeros((n_samples, self.K))
+
+        for j in range(n_samples):
+            pred = []
+            for m in range(self.K):
+                s = 0
+                for i in range(n_features):
+                    ukil = [
+                        self.models[m].getVarByName(f"u_{i}_{l}").x
+                        for l in range(self.n_pieces)
+                    ]
+                    s += fcpm(self.x_abs[i], ukil, X[j][i])
+                pred.append(s)
+            decision_values[j] = pred
+        return decision_values
