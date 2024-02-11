@@ -31,7 +31,8 @@ if __name__ == "__main__":
     # %Pairs Explained
     pairs_explained = metric.PairsExplained()
     print(
-        "Percentage of explained preferences:", pairs_explained.from_model(model, X, Y)
+        "Percentage of explained preferences:", pairs_explained.from_model(
+            model, X, Y)
     )
 
     # %Cluster Intersection
@@ -55,7 +56,7 @@ if __name__ == "__main__":
     indexes = np.linspace(0, len(X) - 1, num=len(X), dtype=int)
     np.random.shuffle(indexes)
     train_indexes = indexes[: int(len(indexes) * 0.8)]
-    test_indexes = indexes[int(len(indexes) * 0.8) :]
+    test_indexes = indexes[int(len(indexes) * 0.8):]
 
     X_train = X[train_indexes]
     Y_train = Y[train_indexes]

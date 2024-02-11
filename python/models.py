@@ -215,6 +215,7 @@ class TwoClustersMIP(BaseModel):
         # To be completed
 
         model = Model("TwoClustersMIP")
+        model.setParam("OutputFlag", 0)
 
         return model
 
@@ -289,7 +290,8 @@ class TwoClustersMIP(BaseModel):
         for j in range(P_samples):
             self.v.append([])
             for k in range(self.n_clusters):
-                self.v[j].append(self.model.addVar(vtype=GRB.BINARY, name=f"v_{j}_{k}"))
+                self.v[j].append(self.model.addVar(
+                    vtype=GRB.BINARY, name=f"v_{j}_{k}"))
 
         # Définition des erreurs de sur et sous-estimation sigma_x + et -, sigma_y + et -
         self.sig_y_p = []
@@ -304,16 +306,20 @@ class TwoClustersMIP(BaseModel):
 
         for j in range(P_samples):
             self.sig_x_p.append(
-                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"sig_x_p_{j}")
+                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS,
+                                  name=f"sig_x_p_{j}")
             )
             self.sig_x_m.append(
-                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"sig_x_m_{j}")
+                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS,
+                                  name=f"sig_x_m_{j}")
             )
             self.sig_y_p.append(
-                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"sig_y_p_{j}")
+                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS,
+                                  name=f"sig_y_p_{j}")
             )
             self.sig_y_m.append(
-                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"sig_y_m_{j}")
+                self.model.addVar(lb=0, vtype=GRB.CONTINUOUS,
+                                  name=f"sig_y_m_{j}")
             )
 
         self.model.update()
@@ -326,12 +332,14 @@ class TwoClustersMIP(BaseModel):
         for k in range(self.n_clusters):
             for i in range(n_features):
                 for l in range(self.n_pieces):
-                    self.model.addConstr(self.u[k][i][l] <= self.u[k][i][l + 1])
+                    self.model.addConstr(
+                        self.u[k][i][l] <= self.u[k][i][l + 1])
 
         # Normalisation des critères : la somme des max des u[k] vaut 1.
         for k in range(self.n_clusters):
             self.model.addConstr(
-                quicksum(self.u[k][i][self.n_pieces] for i in range(n_features)) == 1
+                quicksum(self.u[k][i][self.n_pieces]
+                         for i in range(n_features)) == 1
             )
 
         # Chaque paire j est présente dans au moins 1 cluster
@@ -447,14 +455,17 @@ class HeuristicModelOld(BaseModel):
             max_value = np.max(current_feature_values)
             self.x_abs.append(np.linspace(min_value, max_value, self.n_pieces))
 
-        sample_cluster = np.random.randint(0, self.n_clusters, size=(n_samples))
+        sample_cluster = np.random.randint(
+            0, self.n_clusters, size=(n_samples))
 
         for a in range(self.n_iter):
 
-            print(f"Itération {a} sur {self.n_iter}")
+            # print(f"Itération {a} sur {self.n_iter}")
 
-            X_clusters = [select_lines(X, sample_cluster, k) for k in range(self.K)]
-            Y_clusters = [select_lines(Y, sample_cluster, k) for k in range(self.K)]
+            X_clusters = [select_lines(X, sample_cluster, k)
+                          for k in range(self.K)]
+            Y_clusters = [select_lines(Y, sample_cluster, k)
+                          for k in range(self.K)]
 
             for m in range(self.K):
 
@@ -493,7 +504,8 @@ class HeuristicModelOld(BaseModel):
                         self.models[m].addConstr(u[i][l] <= u[i][l + 1])
 
                 self.models[m].addConstr(
-                    quicksum(u[i][self.n_pieces - 1] for i in range(n_features)) == 1
+                    quicksum(u[i][self.n_pieces - 1]
+                             for i in range(n_features)) == 1
                 )
 
                 # Les fonctions de décision u[k][i] commencent à 0
@@ -514,7 +526,8 @@ class HeuristicModelOld(BaseModel):
                     )
 
                 self.models[m].setObjective(
-                    quicksum(sig_m[j] + sig_p[j] for j in range(len(X_clusters[m]))),
+                    quicksum(sig_m[j] + sig_p[j]
+                             for j in range(len(X_clusters[m]))),
                     GRB.MINIMIZE,
                 )
 
@@ -528,7 +541,8 @@ class HeuristicModelOld(BaseModel):
                 for i in range(len(X_clusters[k])):
                     ux = self.predict_utility([X_clusters[k][i]])
                     uy = self.predict_utility([X_clusters[k][i]])
-                    diff_utility = [ux[0][m] - uy[0][m] for m in range(len(ux[0]))]
+                    diff_utility = [ux[0][m] - uy[0][m]
+                                    for m in range(len(ux[0]))]
                     kluster = diff_utility.index(max(diff_utility))
                     new_X_clusters[kluster].append(X_clusters[k][i])
                     new_Y_clusters[kluster].append(Y_clusters[k][i])
@@ -571,7 +585,7 @@ class HeuristicModelOld(BaseModel):
 
 class HeuristicModel(BaseModel):
 
-    def __init__(self, n_clusters, n_pieces=5, n_iter=3):
+    def __init__(self, n_clusters, n_pieces=5, n_iter=2):
         """Initialization of the Heuristic Model."""
         self.K = n_clusters
         self.n_pieces = n_pieces
@@ -583,6 +597,7 @@ class HeuristicModel(BaseModel):
         models = []
         for i in range(self.K):
             models.append(Model(f"Heuristic_{i}"))
+            models[i].setParam("OutputFlag", 0)
 
         return models
 
@@ -607,8 +622,10 @@ class HeuristicModel(BaseModel):
         self.criteria_min = all_elements.min(axis=0)
         self.criteria_max = all_elements.max(axis=0)
 
-        X_clusters = [select_lines(X, kmeans.labels_, k) for k in range(self.K)]
-        Y_clusters = [select_lines(Y, kmeans.labels_, k) for k in range(self.K)]
+        X_clusters = [select_lines(X, kmeans.labels_, k)
+                      for k in range(self.K)]
+        Y_clusters = [select_lines(Y, kmeans.labels_, k)
+                      for k in range(self.K)]
 
         all_features = np.concatenate([X, Y])
 
@@ -622,7 +639,7 @@ class HeuristicModel(BaseModel):
 
         for a in range(self.n_iter):
 
-            print(f"Itération {a} sur {self.n_iter}")
+            # print(f"Itération {a} sur {self.n_iter}")
 
             for m in range(self.K):
 
@@ -661,7 +678,8 @@ class HeuristicModel(BaseModel):
                         self.models[m].addConstr(u[i][l] <= u[i][l + 1])
 
                 self.models[m].addConstr(
-                    quicksum(u[i][self.n_pieces - 1] for i in range(n_features)) == 1
+                    quicksum(u[i][self.n_pieces - 1]
+                             for i in range(n_features)) == 1
                 )
 
                 # Les fonctions de décision u[k][i] commencent à 0
@@ -682,7 +700,8 @@ class HeuristicModel(BaseModel):
                     )
 
                 self.models[m].setObjective(
-                    quicksum(sig_m[j] + sig_p[j] for j in range(len(X_clusters[m]))),
+                    quicksum(sig_m[j] + sig_p[j]
+                             for j in range(len(X_clusters[m]))),
                     GRB.MINIMIZE,
                 )
 
@@ -695,12 +714,15 @@ class HeuristicModel(BaseModel):
                 u = []
                 for i in range(len(X_clusters[k])):
                     ux = self.predict_utility(
-                        np.array(X_clusters[k][i]).reshape(1, len(X_clusters[k][i]))
+                        np.array(X_clusters[k][i]).reshape(
+                            1, len(X_clusters[k][i]))
                     )
                     uy = self.predict_utility(
-                        np.array(X_clusters[k][i]).reshape(1, len(X_clusters[k][i]))
+                        np.array(X_clusters[k][i]).reshape(
+                            1, len(X_clusters[k][i]))
                     )
-                    diff_utility = [ux[0][m] - uy[0][m] for m in range(len(ux[0]))]
+                    diff_utility = [ux[0][m] - uy[0][m]
+                                    for m in range(len(ux[0]))]
                     kluster = diff_utility.index(max(diff_utility))
                     new_X_clusters[kluster].append(X_clusters[k][i])
                     new_Y_clusters[kluster].append(Y_clusters[k][i])
@@ -733,7 +755,11 @@ class HeuristicModel(BaseModel):
                         self.models[m].getVarByName(f"u_{i}_{l}").x
                         for l in range(self.n_pieces)
                     ]
-                    s += fcpm(self.x_abs[i], ukil, X[j][i])
+                    try:
+                        s += fcpm(self.x_abs[i], ukil, X[j][i])
+                    except:
+                        pass
                 pred.append(s)
             decision_values[j] = pred
+
         return decision_values
